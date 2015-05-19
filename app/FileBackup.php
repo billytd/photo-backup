@@ -11,14 +11,50 @@ class FileBackup {
     public function __construct(array $config, BackupUtilityInterface $backup_utility, WriterInterface $writer)
     {
         $this->writer = $writer;
+        $this->config = $config;
 
-        if (count($missing = array_diff($this->config_required, array_keys($config))) > 0) {
-            $this->writer->writeMessage('The following required settings were missing: ' . implode(', ', $missing));
-            exit;
+        $this->backup_utility = $backup_utility;
+    }
+
+    public function verifySetup()
+    {
+        // verify required config settings were included
+        if (count($missing = array_diff($this->config_required, array_keys($this->config))) > 0) {
+            throw new Exception('The following required settings were missing: ' . implode(', ', $missing));
         }
 
-        $this->config         = $config;
-        $this->backup_utility = $backup_utility;
+        if (!realpath($this->config['backup_path']) || !is_dir($this->config['backup_path'])) {
+            throw new Exception('The "backup_path" specified is invalid, doesn\'t exist or lacks sufficient read permissions.');
+        }
+
+        // verify photos table exists
+        $result = $this->getDb()->query('SHOW TABLES LIKE \'photos\'');
+
+        if (!$result || $result->num_rows != 1) {
+            throw new Exception('It appears setup hasn\'t been run yet. Please run "php backup.php setup"');
+        }
+    }
+
+
+    public function setup()
+    {
+        $create_table = $this->getDb()->query('CREATE TABLE `photos` (
+              `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+              `file_name` varchar(255) NOT NULL,
+              `full_path` varchar(255) NOT NULL,
+              `size` int(11) NOT NULL,
+              `ts_created` int(11) NOT NULL,
+              `ts_modified` int(11) NOT NULL,
+              `aws_bucket` varchar(255) NOT NULL,
+              `aws_key` varchar(255) NOT NULL,
+              `ts_aws_upload` int(11) NOT NULL,
+              `md5` varchar(32) NOT NULL DEFAULT \'\',
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=latin1');
+
+        if (!$create_table) {
+            throw new Exception('Problem creating table "photos": "' . $this->getDb()->error . '"');
+        }
     }
 
     public function performBackup()
